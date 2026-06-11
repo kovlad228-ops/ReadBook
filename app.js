@@ -73,6 +73,10 @@ let state = {
   pdf: null,
   pdfObserver: null,
   pdfRenderToken: 0,
+  pdfRenderQueue: [],
+  pdfQueuedPages: new Set(),
+  pdfRenderingPages: new Set(),
+  pdfActiveRenders: 0,
   renderedPdfPages: new Set(),
   authMode: "login",
   auth: null,
@@ -84,6 +88,24 @@ let state = {
 
 const wheelScrollSpeed = 2.6;
 const scriptLoaders = new Map();
+
+function isMobileReadingDevice() {
+  return window.matchMedia("(max-width: 820px), (pointer: coarse)").matches;
+}
+
+function getPdfRenderSettings() {
+  const mobile = isMobileReadingDevice();
+  return {
+    rootMargin: mobile ? "420px 0px" : "900px 0px",
+    initialPages: mobile ? 1 : 3,
+    maxConcurrent: mobile ? 1 : 2,
+    maxCachedPages: mobile ? 5 : 14,
+    keepAroundPage: mobile ? 2 : 5,
+    minScale: mobile ? 0.82 : 1.05,
+    maxScale: mobile ? 1.35 : 2.4,
+    pixelRatio: Math.min(window.devicePixelRatio || 1, mobile ? 1.15 : 1.75),
+  };
+}
 
 function loadScript(src, globalName, label) {
   if (window[globalName]) return Promise.resolve(window[globalName]);
@@ -617,7 +639,7 @@ async function makeBookKey(file, buffer) {
 async function fingerprintBuffer(buffer) {
   if (window.crypto?.subtle) {
     try {
-      const digest = await crypto.subtle.digest("SHA-256", buffer.slice(0));
+      const digest = await crypto.subtle.digest("SHA-256", buffer);
       return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
     } catch {
       // Fall back to a deterministic in-browser fingerprint below.
@@ -656,7 +678,7 @@ async function handleFile(file) {
         ext,
         format: state.format,
         title: niceTitleFromFile(file.name),
-        buffer: buffer.slice(0),
+        buffer,
       });
       cachedForRestore = true;
     } catch (cacheError) {
@@ -1114,30 +1136,66 @@ function startPdfRendering(pdf, pageCount) {
   state.pdf = pdf;
   state.pdfRenderToken += 1;
   state.renderedPdfPages = new Set();
+  state.pdfRenderQueue = [];
+  state.pdfQueuedPages = new Set();
+  state.pdfRenderingPages = new Set();
+  state.pdfActiveRenders = 0;
   const token = state.pdfRenderToken;
+  const settings = getPdfRenderSettings();
   const pages = [...els.readerContent.querySelectorAll(".pdf-page")];
 
   const renderVisible = (entries) => {
     entries.forEach((entry) => {
       if (!entry.isIntersecting) return;
       const pageNumber = Number(entry.target.dataset.page);
-      renderPdfPage(pageNumber, token);
+      queuePdfPageRender(pageNumber, token);
     });
   };
 
   state.pdfObserver = new IntersectionObserver(renderVisible, {
     root: els.readerViewport,
-    rootMargin: "900px 0px",
+    rootMargin: settings.rootMargin,
     threshold: 0.01,
   });
 
   pages.forEach((page) => state.pdfObserver.observe(page));
-  pages.slice(0, Math.min(3, pageCount)).forEach((page) => renderPdfPage(Number(page.dataset.page), token));
+  pages.slice(0, Math.min(settings.initialPages, pageCount)).forEach((page) => queuePdfPageRender(Number(page.dataset.page), token, true));
+}
+
+function queuePdfPageRender(pageNumber, token, priority = false) {
+  if (!state.pdf || token !== state.pdfRenderToken) return;
+  if (state.renderedPdfPages.has(pageNumber) || state.pdfQueuedPages.has(pageNumber) || state.pdfRenderingPages.has(pageNumber)) return;
+
+  state.pdfQueuedPages.add(pageNumber);
+  if (priority) state.pdfRenderQueue.unshift(pageNumber);
+  else state.pdfRenderQueue.push(pageNumber);
+  processPdfRenderQueue(token);
+}
+
+function processPdfRenderQueue(token) {
+  if (!state.pdf || token !== state.pdfRenderToken) return;
+  const settings = getPdfRenderSettings();
+
+  while (state.pdfActiveRenders < settings.maxConcurrent && state.pdfRenderQueue.length) {
+    const pageNumber = state.pdfRenderQueue.shift();
+    state.pdfQueuedPages.delete(pageNumber);
+    if (state.renderedPdfPages.has(pageNumber) || state.pdfRenderingPages.has(pageNumber)) continue;
+
+    state.pdfActiveRenders += 1;
+    state.pdfRenderingPages.add(pageNumber);
+    renderPdfPage(pageNumber, token)
+      .catch((error) => console.error(error))
+      .finally(() => {
+        state.pdfActiveRenders = Math.max(0, state.pdfActiveRenders - 1);
+        state.pdfRenderingPages.delete(pageNumber);
+        trimPdfCanvasCache(pageNumber);
+        processPdfRenderQueue(token);
+      });
+  }
 }
 
 async function renderPdfPage(pageNumber, token) {
   if (!state.pdf || state.renderedPdfPages.has(pageNumber)) return;
-  state.renderedPdfPages.add(pageNumber);
 
   const section = els.readerContent.querySelector(`[data-page="${pageNumber}"]`);
   const canvas = section?.querySelector("canvas");
@@ -1151,9 +1209,9 @@ async function renderPdfPage(pageNumber, token) {
     const baseViewport = page.getViewport({ scale: 1 });
     section.style.setProperty("--pdf-page-width", Math.round(baseViewport.width));
     section.style.setProperty("--pdf-page-height", Math.round(baseViewport.height));
-    const availableWidth = Math.max(320, section.clientWidth);
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-    const scale = Math.min(2.6, Math.max(1.1, (availableWidth * pixelRatio) / baseViewport.width));
+    const settings = getPdfRenderSettings();
+    const availableWidth = Math.max(260, section.clientWidth);
+    const scale = Math.min(settings.maxScale, Math.max(settings.minScale, (availableWidth * settings.pixelRatio) / baseViewport.width));
     const viewport = page.getViewport({ scale });
     const context = canvas.getContext("2d", { alpha: false });
 
@@ -1163,6 +1221,9 @@ async function renderPdfPage(pageNumber, token) {
     canvas.style.height = "100%";
 
     await page.render({ canvasContext: context, viewport }).promise;
+    page.cleanup?.();
+    if (token !== state.pdfRenderToken) return;
+    state.renderedPdfPages.add(pageNumber);
     section.classList.remove("is-rendering");
     section.classList.add("is-rendered");
   } catch (error) {
@@ -1170,6 +1231,52 @@ async function renderPdfPage(pageNumber, token) {
     section.classList.remove("is-rendering");
     section.classList.add("is-failed");
   }
+}
+
+function trimPdfCanvasCache(anchorPageNumber = getCurrentPdfPageNumber()) {
+  if (!state.pdf || !state.renderedPdfPages.size) return;
+  const settings = getPdfRenderSettings();
+  if (state.renderedPdfPages.size <= settings.maxCachedPages) return;
+
+  const renderedPages = [...state.renderedPdfPages].sort((a, b) => Math.abs(b - anchorPageNumber) - Math.abs(a - anchorPageNumber));
+  for (const pageNumber of renderedPages) {
+    if (state.renderedPdfPages.size <= settings.maxCachedPages) break;
+    if (Math.abs(pageNumber - anchorPageNumber) <= settings.keepAroundPage) continue;
+    clearPdfPageCanvas(pageNumber);
+  }
+}
+
+function clearPdfPageCanvas(pageNumber) {
+  const section = els.readerContent.querySelector(`[data-page="${pageNumber}"]`);
+  const canvas = section?.querySelector("canvas");
+  if (!section || !canvas) return;
+
+  canvas.width = 1;
+  canvas.height = 1;
+  section.classList.remove("is-rendering", "is-rendered", "is-failed");
+  state.renderedPdfPages.delete(pageNumber);
+}
+
+function getCurrentPdfPageNumber() {
+  const pages = [...els.readerContent.querySelectorAll(".pdf-page")];
+  if (!pages.length) return 1;
+
+  const viewportRect = els.readerViewport.getBoundingClientRect();
+  const viewportCenter = viewportRect.top + viewportRect.height / 2;
+  let currentPage = Number(pages[0].dataset.page || 1);
+  let closestDistance = Number.POSITIVE_INFINITY;
+
+  for (const page of pages) {
+    const rect = page.getBoundingClientRect();
+    const pageCenter = rect.top + rect.height / 2;
+    const distance = Math.abs(pageCenter - viewportCenter);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      currentPage = Number(page.dataset.page || currentPage);
+    }
+  }
+
+  return currentPage;
 }
 
 function renderBook(html, title, ext, meta = {}) {
