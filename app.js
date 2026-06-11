@@ -19,6 +19,8 @@ const els = {
   tocTab: document.getElementById("tocTab"),
   marksTab: document.getElementById("marksTab"),
   sidebarToggle: document.getElementById("sidebarToggle"),
+  fullscreenButton: document.getElementById("fullscreenButton"),
+  fullscreenExit: document.getElementById("fullscreenExit"),
   fontSize: document.getElementById("fontSize"),
   measure: document.getElementById("measure"),
   bookmarkButton: document.getElementById("bookmarkButton"),
@@ -74,6 +76,7 @@ let state = {
   renderedPdfPages: new Set(),
   authMode: "login",
   auth: null,
+  readingFullscreen: false,
   saveTimer: null,
   syncTimer: null,
   toastTimer: null,
@@ -1242,6 +1245,11 @@ function refreshTocOffsets() {
   });
 }
 
+function getReadingProgress() {
+  const maxScroll = Math.max(1, els.readerViewport.scrollHeight - els.readerViewport.clientHeight);
+  return Math.min(1, Math.max(0, els.readerViewport.scrollTop / maxScroll));
+}
+
 function updateProgress() {
   const maxScroll = Math.max(1, els.readerViewport.scrollHeight - els.readerViewport.clientHeight);
   const progress = Math.min(100, Math.max(0, (els.readerViewport.scrollTop / maxScroll) * 100));
@@ -1367,6 +1375,66 @@ function jumpToProgress(progress) {
   updateProgress();
 }
 
+function refreshPdfPagesForLayout() {
+  if (!state.pdf) return;
+  els.readerContent.querySelectorAll(".pdf-page").forEach((page) => {
+    const canvas = page.querySelector("canvas");
+    page.classList.remove("is-rendering", "is-rendered", "is-failed");
+    if (canvas) {
+      canvas.removeAttribute("width");
+      canvas.removeAttribute("height");
+    }
+  });
+  startPdfRendering(state.pdf, els.readerContent.querySelectorAll(".pdf-page").length);
+}
+
+function applyReadingFullscreen(active, progress = getReadingProgress()) {
+  state.readingFullscreen = active;
+  els.body.classList.toggle("reading-fullscreen", active);
+  els.fullscreenButton.setAttribute("aria-pressed", String(active));
+  els.fullscreenButton.setAttribute("aria-label", active ? "Выйти из режима чтения" : "Открыть книгу во весь экран");
+  els.fullscreenButton.title = active ? "Выйти из режима чтения" : "Режим чтения";
+  els.fullscreenButton.querySelector("i")?.setAttribute("data-lucide", active ? "minimize-2" : "maximize-2");
+
+  window.requestAnimationFrame(() => {
+    jumpToProgress(progress);
+    refreshPdfPagesForLayout();
+    refreshIcons();
+  });
+}
+
+async function enterReadingFullscreen() {
+  const progress = getReadingProgress();
+  applyReadingFullscreen(true, progress);
+
+  const requestFullscreen = els.app.requestFullscreen || els.app.webkitRequestFullscreen;
+  if (requestFullscreen && !document.fullscreenElement && !document.webkitFullscreenElement) {
+    try {
+      await requestFullscreen.call(els.app);
+    } catch {
+      // iOS Safari often blocks element fullscreen; the CSS reading mode still works.
+    }
+  }
+}
+
+async function exitReadingFullscreen() {
+  const progress = getReadingProgress();
+  const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
+  if ((document.fullscreenElement || document.webkitFullscreenElement) && exitFullscreen) {
+    try {
+      await exitFullscreen.call(document);
+    } catch {
+      // Keep the manual reading-mode exit reliable even if native fullscreen refuses.
+    }
+  }
+  applyReadingFullscreen(false, progress);
+}
+
+function toggleReadingFullscreen() {
+  if (state.readingFullscreen) exitReadingFullscreen();
+  else enterReadingFullscreen();
+}
+
 function switchTab(tab) {
   const showToc = tab === "toc";
   els.tocPanel.classList.toggle("hidden", !showToc);
@@ -1466,6 +1534,8 @@ function bindEvents() {
   els.tocTab.addEventListener("click", () => switchTab("toc"));
   els.marksTab.addEventListener("click", () => switchTab("marks"));
   els.sidebarToggle.addEventListener("click", () => els.app.classList.toggle("sidebar-collapsed"));
+  els.fullscreenButton.addEventListener("click", toggleReadingFullscreen);
+  els.fullscreenExit.addEventListener("click", exitReadingFullscreen);
   els.bookmarkButton.addEventListener("click", addBookmark);
   els.searchNext.addEventListener("click", findNext);
   els.searchInput.addEventListener("keydown", (event) => {
@@ -1484,7 +1554,17 @@ function bindEvents() {
     if (event.target === els.authModal) closeAuthModal();
   });
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.readingFullscreen) {
+      exitReadingFullscreen();
+      return;
+    }
     if (event.key === "Escape" && !els.authModal.classList.contains("hidden")) closeAuthModal();
+  });
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && state.readingFullscreen) applyReadingFullscreen(false);
+  });
+  document.addEventListener("webkitfullscreenchange", () => {
+    if (!document.webkitFullscreenElement && state.readingFullscreen) applyReadingFullscreen(false);
   });
 }
 

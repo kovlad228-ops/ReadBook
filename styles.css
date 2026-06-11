@@ -1179,6 +1179,90 @@ button {
   transform: translateY(0);
 }
 
+.fullscreen-exit {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  display: none;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--subtle));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
+  box-shadow: 0 14px 40px rgba(8, 19, 22, 0.22);
+  color: var(--accent-strong);
+  z-index: 60;
+}
+
+.fullscreen-exit svg {
+  width: 19px;
+  height: 19px;
+}
+
+body.reading-fullscreen {
+  overflow: hidden;
+  background: var(--bg);
+}
+
+body.reading-fullscreen .app,
+body.reading-fullscreen .reader-shell {
+  display: grid;
+  height: 100dvh;
+  min-height: 100dvh;
+}
+
+body.reading-fullscreen .app,
+body.reading-fullscreen .app.sidebar-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.reading-fullscreen .reader-shell {
+  grid-template-rows: 3px minmax(0, 1fr);
+}
+
+body.reading-fullscreen .sidebar,
+body.reading-fullscreen .toolbar,
+body.reading-fullscreen .statusbar {
+  display: none !important;
+}
+
+body.reading-fullscreen .fullscreen-exit {
+  display: grid;
+}
+
+body.reading-fullscreen .reader-viewport {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: auto;
+}
+
+body.reading-fullscreen .reader-content {
+  width: min(100%, var(--reader-measure));
+  min-height: 100%;
+  margin: 0 auto;
+  padding:
+    max(32px, env(safe-area-inset-top))
+    max(18px, env(safe-area-inset-right))
+    max(40px, env(safe-area-inset-bottom))
+    max(18px, env(safe-area-inset-left));
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+body.reading-fullscreen .reader-content.pdf-document {
+  width: 100%;
+  max-width: none;
+  padding: 0 0 max(22px, env(safe-area-inset-bottom));
+}
+
+body.reading-fullscreen .pdf-page {
+  width: min(100%, 980px);
+  margin-bottom: 12px;
+  box-shadow: none;
+}
+
 @media (max-width: 1080px) {
   .toolbar {
     flex-wrap: wrap;
