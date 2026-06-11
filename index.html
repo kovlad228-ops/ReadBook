@@ -9,9 +9,9 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
     <link rel="apple-touch-icon" href="./icons/icon-192.png" />
-    <link rel="stylesheet" href="./styles.css?v=20260611-3" />
+    <link rel="stylesheet" href="./styles.css?v=20260611-4" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-    <script defer src="./app.js?v=20260611-3"></script>
+    <script defer src="./app.js?v=20260611-4"></script>
   </head>
   <body data-theme="day">
     <div class="app">
@@ -149,9 +149,14 @@
           <span id="chapterText">Нет открытой книги</span>
           <span id="savedText">Готово к чтению</span>
         </footer>
-        <button class="fullscreen-exit" id="fullscreenExit" type="button" title="Выйти из режима чтения" aria-label="Выйти из режима чтения">
-          <i data-lucide="minimize-2"></i>
-        </button>
+        <div class="fullscreen-actions" role="group" aria-label="Действия в режиме чтения">
+          <button class="fullscreen-action" id="fullscreenBookmarkButton" type="button" title="Добавить закладку" aria-label="Добавить закладку">
+            <i data-lucide="bookmark-plus"></i>
+          </button>
+          <button class="fullscreen-action" id="fullscreenExit" type="button" title="Выйти из режима чтения" aria-label="Выйти из режима чтения">
+            <i data-lucide="minimize-2"></i>
+          </button>
+        </div>
       </main>
     </div>
 

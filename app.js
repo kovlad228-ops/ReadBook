@@ -20,6 +20,7 @@ const els = {
   marksTab: document.getElementById("marksTab"),
   sidebarToggle: document.getElementById("sidebarToggle"),
   fullscreenButton: document.getElementById("fullscreenButton"),
+  fullscreenBookmarkButton: document.getElementById("fullscreenBookmarkButton"),
   fullscreenExit: document.getElementById("fullscreenExit"),
   fontSize: document.getElementById("fontSize"),
   measure: document.getElementById("measure"),
@@ -1650,6 +1651,7 @@ function bindEvents() {
   els.marksTab.addEventListener("click", () => switchTab("marks"));
   els.sidebarToggle.addEventListener("click", () => els.app.classList.toggle("sidebar-collapsed"));
   els.fullscreenButton.addEventListener("click", toggleReadingFullscreen);
+  els.fullscreenBookmarkButton.addEventListener("click", addBookmark);
   els.fullscreenExit.addEventListener("click", exitReadingFullscreen);
   els.bookmarkButton.addEventListener("click", addBookmark);
   els.searchNext.addEventListener("click", findNext);

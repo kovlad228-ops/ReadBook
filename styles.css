@@ -1179,11 +1179,17 @@ button {
   transform: translateY(0);
 }
 
-.fullscreen-exit {
+.fullscreen-actions {
   position: fixed;
   top: max(14px, env(safe-area-inset-top));
   right: max(14px, env(safe-area-inset-right));
   display: none;
+  gap: 8px;
+  z-index: 60;
+}
+
+.fullscreen-action {
+  display: grid;
   width: 42px;
   height: 42px;
   place-items: center;
@@ -1192,10 +1198,10 @@ button {
   background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
   box-shadow: 0 14px 40px rgba(8, 19, 22, 0.22);
   color: var(--accent-strong);
-  z-index: 60;
+  cursor: pointer;
 }
 
-.fullscreen-exit svg {
+.fullscreen-action svg {
   width: 19px;
   height: 19px;
 }
@@ -1227,7 +1233,7 @@ body.reading-fullscreen .statusbar {
   display: none !important;
 }
 
-body.reading-fullscreen .fullscreen-exit {
+body.reading-fullscreen .fullscreen-actions {
   display: grid;
 }
 
