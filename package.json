@@ -3,13 +3,50 @@
   "version": "1.0.0",
   "private": true,
   "description": "Personal book reader with bookmarks, progress, accounts, and PWA support.",
+  "author": "kovlad",
+  "main": "desktop/main.js",
   "scripts": {
     "start": "node server.js",
+    "desktop": "electron .",
+    "dist": "electron-builder --win nsis",
+    "dist:portable": "electron-builder --win portable",
     "dev": "npx netlify-cli dev",
-    "check": "node --check app.js && node --check server.js && node --check netlify/functions/api.mjs"
+    "check": "node --check app.js && node --check server.js && node --check netlify/functions/api.mjs && node --check desktop/main.js"
   },
   "dependencies": {
     "@netlify/blobs": "^9.1.2"
+  },
+  "devDependencies": {
+    "electron": "37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.kovlad.litera",
+    "productName": "Litera Reader",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "buildResources": "icons",
+      "output": "release"
+    },
+    "files": [
+      "desktop/**/*",
+      "icons/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "icon-512.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Litera Reader"
+    }
   },
   "engines": {
     "node": ">=18"
