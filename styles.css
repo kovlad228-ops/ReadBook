@@ -83,6 +83,212 @@ button {
   color: inherit;
 }
 
+.app-splash {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 22px;
+  padding: 28px;
+  background:
+    radial-gradient(circle at 50% 36%, color-mix(in srgb, var(--surface-strong) 86%, transparent), transparent 34%),
+    linear-gradient(125deg, rgba(36, 124, 122, 0.16), transparent 36%),
+    linear-gradient(315deg, rgba(204, 102, 77, 0.13), transparent 34%),
+    var(--bg);
+  color: var(--ink);
+  transition:
+    opacity 0.42s ease,
+    visibility 0.42s ease;
+  z-index: 100;
+}
+
+.app-splash[hidden] {
+  display: none;
+}
+
+body.splash-done .app-splash {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.splash-stage {
+  position: relative;
+  width: 230px;
+  height: 174px;
+}
+
+.splash-books {
+  position: absolute;
+  right: 44px;
+  bottom: 30px;
+  left: 44px;
+  height: 116px;
+}
+
+.splash-book {
+  position: absolute;
+  bottom: 0;
+  width: 34px;
+  height: 98px;
+  border-radius: 7px 7px 3px 3px;
+  box-shadow:
+    inset -8px 0 0 rgba(0, 0, 0, 0.08),
+    0 18px 32px rgba(20, 48, 52, 0.16);
+  transform-origin: 50% 100%;
+}
+
+.splash-book::after {
+  position: absolute;
+  right: 9px;
+  bottom: 14px;
+  left: 9px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.52);
+  content: "";
+}
+
+.splash-book-teal {
+  left: 8px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+  animation: splashBookTeal 1.72s cubic-bezier(0.2, 0.8, 0.22, 1) both;
+}
+
+.splash-book-coral {
+  left: 48px;
+  height: 110px;
+  background: linear-gradient(180deg, #df735a, var(--accent-warm));
+  animation: splashBookCoral 1.72s cubic-bezier(0.2, 0.8, 0.22, 1) 0.08s both;
+}
+
+.splash-book-gold {
+  left: 88px;
+  height: 92px;
+  background: linear-gradient(180deg, #e3b14a, var(--gold));
+  animation: splashBookGold 1.72s cubic-bezier(0.2, 0.8, 0.22, 1) 0.16s both;
+}
+
+.splash-shelf {
+  position: absolute;
+  right: 24px;
+  bottom: 26px;
+  left: 24px;
+  height: 11px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.38), transparent),
+    color-mix(in srgb, var(--accent-strong) 74%, var(--ink));
+  box-shadow:
+    0 15px 22px rgba(20, 48, 52, 0.2),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.14);
+  transform-origin: 50% 50%;
+  animation: splashShelf 1.72s ease both;
+}
+
+.splash-brand {
+  display: grid;
+  gap: 6px;
+  text-align: center;
+  animation: splashBrand 1.72s ease both;
+}
+
+.splash-brand span {
+  font-size: 28px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.splash-brand small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@keyframes splashBookTeal {
+  0% {
+    transform: translate(24px, -34px) rotate(-24deg) scale(1.02);
+  }
+  58% {
+    transform: translate(-14px, -11px) rotate(-8deg) scale(1.01);
+  }
+  82% {
+    transform: translate(0, 3px) rotate(2deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(-3deg);
+  }
+}
+
+@keyframes splashBookCoral {
+  0% {
+    transform: translate(0, -48px) rotate(4deg) scale(1.05);
+  }
+  58% {
+    transform: translate(0, -16px) rotate(1deg) scale(1.01);
+  }
+  82% {
+    transform: translate(0, 4px) rotate(-1deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+}
+
+@keyframes splashBookGold {
+  0% {
+    transform: translate(-25px, -30px) rotate(22deg) scale(1.02);
+  }
+  58% {
+    transform: translate(12px, -10px) rotate(8deg) scale(1.01);
+  }
+  82% {
+    transform: translate(0, 3px) rotate(-2deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(4deg);
+  }
+}
+
+@keyframes splashShelf {
+  0%,
+  30% {
+    opacity: 0;
+    transform: scaleX(0.5);
+  }
+  70%,
+  100% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes splashBrand {
+  0%,
+  36% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-splash,
+  .splash-book,
+  .splash-shelf,
+  .splash-brand {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 .app {
   display: grid;
   grid-template-columns: 328px minmax(0, 1fr);

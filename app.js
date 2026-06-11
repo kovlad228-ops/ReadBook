@@ -1,5 +1,6 @@
 const els = {
   app: document.querySelector(".app"),
+  appSplash: document.getElementById("appSplash"),
   body: document.body,
   fileInput: document.getElementById("fileInput"),
   openButton: document.getElementById("openButton"),
@@ -89,6 +90,8 @@ let state = {
 
 const wheelScrollSpeed = 2.6;
 const scriptLoaders = new Map();
+const splashMinimumMs = 1900;
+const splashStartedAt = getStartupNow();
 
 function isMobileReadingDevice() {
   return window.matchMedia("(max-width: 820px), (pointer: coarse)").matches;
@@ -278,6 +281,33 @@ function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("visible");
   state.toastTimer = window.setTimeout(() => els.toast.classList.remove("visible"), 2600);
+}
+
+function getStartupNow() {
+  return window.performance?.now?.() || Date.now();
+}
+
+function waitForWindowLoad() {
+  if (document.readyState === "complete") return Promise.resolve();
+
+  return new Promise((resolve) => {
+    window.addEventListener("load", resolve, { once: true });
+  });
+}
+
+async function finishInitialLoad(restorePromise) {
+  await Promise.allSettled([Promise.resolve(restorePromise), waitForWindowLoad()]);
+  const elapsed = getStartupNow() - splashStartedAt;
+  const delay = Math.max(0, splashMinimumMs - elapsed);
+  window.setTimeout(hideSplash, delay);
+}
+
+function hideSplash() {
+  if (!els.appSplash) return;
+  els.body.classList.add("splash-done");
+  window.setTimeout(() => {
+    els.appSplash.setAttribute("hidden", "");
+  }, 520);
 }
 
 function setActiveUserStore(userId) {
@@ -1859,6 +1889,7 @@ initAuth();
 applySettings();
 bindEvents();
 maybeLoadDemoBook();
-restoreLastCachedBook();
+const initialBookRestore = restoreLastCachedBook();
 registerServiceWorker();
 window.addEventListener("load", refreshIcons);
+finishInitialLoad(initialBookRestore);
