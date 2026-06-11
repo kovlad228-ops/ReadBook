@@ -96,15 +96,22 @@ function isMobileReadingDevice() {
 function getPdfRenderSettings() {
   const mobile = isMobileReadingDevice();
   return {
-    rootMargin: mobile ? "420px 0px" : "900px 0px",
+    rootMargin: mobile ? "320px 0px" : "900px 0px",
     initialPages: mobile ? 1 : 3,
     maxConcurrent: mobile ? 1 : 2,
-    maxCachedPages: mobile ? 5 : 14,
+    maxCachedPages: mobile ? 4 : 14,
     keepAroundPage: mobile ? 2 : 5,
-    minScale: mobile ? 0.82 : 1.05,
-    maxScale: mobile ? 1.35 : 2.4,
-    pixelRatio: Math.min(window.devicePixelRatio || 1, mobile ? 1.15 : 1.75),
+    minScale: mobile ? 1.05 : 1.05,
+    maxScale: mobile ? 1.9 : 2.4,
+    pixelRatio: Math.min(window.devicePixelRatio || 1, mobile ? 1.75 : 1.75),
+    maxPixels: mobile ? 1600000 : 3200000,
   };
+}
+
+function fitScaleToPixelBudget(scale, baseViewport, maxPixels) {
+  const pixels = baseViewport.width * scale * baseViewport.height * scale;
+  if (!maxPixels || pixels <= maxPixels) return scale;
+  return Math.sqrt(maxPixels / (baseViewport.width * baseViewport.height));
 }
 
 function loadScript(src, globalName, label) {
@@ -1211,7 +1218,8 @@ async function renderPdfPage(pageNumber, token) {
     section.style.setProperty("--pdf-page-height", Math.round(baseViewport.height));
     const settings = getPdfRenderSettings();
     const availableWidth = Math.max(260, section.clientWidth);
-    const scale = Math.min(settings.maxScale, Math.max(settings.minScale, (availableWidth * settings.pixelRatio) / baseViewport.width));
+    const preferredScale = Math.min(settings.maxScale, Math.max(settings.minScale, (availableWidth * settings.pixelRatio) / baseViewport.width));
+    const scale = fitScaleToPixelBudget(preferredScale, baseViewport, settings.maxPixels);
     const viewport = page.getViewport({ scale });
     const context = canvas.getContext("2d", { alpha: false });
 
