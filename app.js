@@ -1363,7 +1363,13 @@ function refreshTocOffsets() {
 
 function getReadingProgress() {
   const maxScroll = Math.max(1, els.readerViewport.scrollHeight - els.readerViewport.clientHeight);
-  return Math.min(1, Math.max(0, els.readerViewport.scrollTop / maxScroll));
+  return clamp01(els.readerViewport.scrollTop / maxScroll);
+}
+
+function clamp01(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.min(1, Math.max(0, number));
 }
 
 function updateProgress() {
@@ -1445,10 +1451,12 @@ function addBookmark() {
   refreshTocOffsets();
   const maxScroll = Math.max(1, els.readerViewport.scrollHeight - els.readerViewport.clientHeight);
   const current = [...state.toc].reverse().find((item) => item.top <= els.readerViewport.scrollTop + 90);
+  const pdfPosition = state.pdf ? getCurrentPdfPosition() : null;
   const mark = {
     id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
-    title: current?.text || state.title,
-    progress: els.readerViewport.scrollTop / maxScroll,
+    title: pdfPosition ? `Страница ${pdfPosition.pageNumber}` : current?.text || state.title,
+    progress: clamp01(els.readerViewport.scrollTop / maxScroll),
+    ...(pdfPosition || {}),
     createdAt: Date.now(),
   };
 
@@ -1456,6 +1464,43 @@ function addBookmark() {
   updateBookmarksPanel();
   scheduleSaveProgress();
   showToast("Закладка добавлена");
+}
+
+function getCurrentPdfPosition() {
+  const pages = [...els.readerContent.querySelectorAll(".pdf-page")];
+  if (!pages.length) return null;
+
+  const viewportRect = els.readerViewport.getBoundingClientRect();
+  const referenceOffset = getBookmarkReferenceOffset();
+  const referenceY = viewportRect.top + referenceOffset;
+  let selectedPage = pages[0];
+  let selectedRect = selectedPage.getBoundingClientRect();
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const page of pages) {
+    const rect = page.getBoundingClientRect();
+    if (rect.top <= referenceY && rect.bottom >= referenceY) {
+      selectedPage = page;
+      selectedRect = rect;
+      break;
+    }
+
+    const distance = Math.min(Math.abs(rect.top - referenceY), Math.abs(rect.bottom - referenceY));
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      selectedPage = page;
+      selectedRect = rect;
+    }
+  }
+
+  return {
+    pageNumber: Number(selectedPage.dataset.page || 1),
+    pageOffset: clamp01((referenceY - selectedRect.top) / Math.max(1, selectedRect.height)),
+  };
+}
+
+function getBookmarkReferenceOffset() {
+  return Math.min(140, Math.max(48, els.readerViewport.clientHeight * 0.18));
 }
 
 function updateBookmarksPanel() {
@@ -1470,7 +1515,7 @@ function updateBookmarksPanel() {
         <div class="bookmark-item" data-mark-id="${mark.id}">
           <button class="bookmark-jump" type="button">
             <span class="bookmark-title">${escapeHtml(mark.title)}</span>
-            <span class="bookmark-meta">${Math.round(mark.progress * 100)}% · ${new Date(mark.createdAt).toLocaleDateString("ru-RU")}</span>
+            <span class="bookmark-meta">${escapeHtml(formatBookmarkMeta(mark))}</span>
           </button>
           <div class="bookmark-row">
             <span class="bookmark-meta">Место чтения</span>
@@ -1485,10 +1530,54 @@ function updateBookmarksPanel() {
   refreshIcons();
 }
 
+function formatBookmarkMeta(mark) {
+  const date = new Date(mark.createdAt).toLocaleDateString("ru-RU");
+  const place = mark.pageNumber ? `Страница ${mark.pageNumber}` : `${Math.round(clamp01(mark.progress) * 100)}%`;
+  return `${place} · ${date}`;
+}
+
 function jumpToProgress(progress) {
   const maxScroll = Math.max(1, els.readerViewport.scrollHeight - els.readerViewport.clientHeight);
-  els.readerViewport.scrollTop = progress * maxScroll;
+  els.readerViewport.scrollTop = clamp01(progress) * maxScroll;
   updateProgress();
+}
+
+function jumpToBookmark(mark) {
+  if (state.pdf && mark.pageNumber && jumpToPdfPage(mark.pageNumber, mark.pageOffset)) return;
+  jumpToProgress(mark.progress);
+}
+
+function jumpToPdfPage(pageNumber, pageOffset = 0) {
+  const targetPageNumber = Number(pageNumber);
+  if (!Number.isFinite(targetPageNumber) || targetPageNumber < 1) return false;
+
+  const page = document.getElementById(`pdf-page-${targetPageNumber}`);
+  if (!page) return false;
+
+  const viewportRect = els.readerViewport.getBoundingClientRect();
+  const pageRect = page.getBoundingClientRect();
+  const pageTop = pageRect.top - viewportRect.top + els.readerViewport.scrollTop;
+  const maxScroll = Math.max(0, els.readerViewport.scrollHeight - els.readerViewport.clientHeight);
+  const target = pageTop + pageRect.height * clamp01(pageOffset) - getBookmarkReferenceOffset();
+
+  els.readerViewport.scrollTop = Math.min(maxScroll, Math.max(0, target));
+  queuePdfPageRender(targetPageNumber, state.pdfRenderToken, true);
+  if (targetPageNumber > 1) queuePdfPageRender(targetPageNumber - 1, state.pdfRenderToken);
+  if (!state.pdf?.numPages || targetPageNumber < state.pdf.numPages) queuePdfPageRender(targetPageNumber + 1, state.pdfRenderToken);
+  updateProgress();
+  return true;
+}
+
+function openBookmark(mark) {
+  const progress = clamp01(mark.progress);
+  if (!state.readingFullscreen) enterReadingFullscreen(progress);
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      jumpToBookmark(mark);
+      showToast("Открыта закладка");
+    });
+  });
 }
 
 function refreshPdfPagesForLayout() {
@@ -1519,8 +1608,7 @@ function applyReadingFullscreen(active, progress = getReadingProgress()) {
   });
 }
 
-async function enterReadingFullscreen() {
-  const progress = getReadingProgress();
+async function enterReadingFullscreen(progress = getReadingProgress()) {
   applyReadingFullscreen(true, progress);
 
   const requestFullscreen = els.app.requestFullscreen || els.app.webkitRequestFullscreen;
@@ -1644,7 +1732,7 @@ function bindEvents() {
       return;
     }
 
-    jumpToProgress(mark.progress);
+    openBookmark(mark);
   });
 
   els.tocTab.addEventListener("click", () => switchTab("toc"));
