@@ -14,6 +14,12 @@
   --reader-font-size: 20px;
   --reader-line-height: 1.72;
   --reader-measure: 740px;
+  --reader-zoomed-font-size: 20px;
+  --reader-zoomed-measure: 740px;
+  --reader-zoom-width: 100%;
+  --pdf-document-max-width: 1040px;
+  --pdf-page-max-width: 930px;
+  --pdf-full-page-max-width: 980px;
   color-scheme: light;
 }
 
@@ -871,7 +877,7 @@ body.splash-done .app-splash {
 
 .reader-viewport {
   min-height: 0;
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -882,7 +888,7 @@ body.splash-done .app-splash {
 }
 
 .reader-content {
-  width: min(calc(100% - 44px), var(--reader-measure));
+  width: min(calc(100% - 44px), var(--reader-zoomed-measure));
   min-height: calc(100% - 56px);
   margin: 28px auto;
   padding: clamp(28px, 4vw, 58px);
@@ -895,7 +901,7 @@ body.splash-done .app-splash {
     Georgia,
     "Times New Roman",
     serif;
-  font-size: var(--reader-font-size);
+  font-size: var(--reader-zoomed-font-size);
   line-height: var(--reader-line-height);
 }
 
@@ -1052,7 +1058,7 @@ body.splash-done .app-splash {
 }
 
 .reader-viewport.pdf-mode .reader-content {
-  width: min(calc(100% - 32px), 1040px);
+  width: min(calc(var(--reader-zoom-width) - 32px), var(--pdf-document-max-width));
 }
 
 .reader-content.pdf-document {
@@ -1079,7 +1085,7 @@ body.splash-done .app-splash {
 .pdf-page {
   position: relative;
   display: block;
-  width: min(100%, 930px);
+  width: min(100%, var(--pdf-page-max-width));
   margin: 0 auto 22px;
   aspect-ratio: var(--pdf-page-width) / var(--pdf-page-height);
   overflow: hidden;
@@ -1468,12 +1474,13 @@ body.reading-fullscreen .fullscreen-actions {
 
 body.reading-fullscreen .reader-viewport {
   min-height: 0;
+  overflow-x: auto;
   overflow-y: auto;
   scrollbar-gutter: auto;
 }
 
 body.reading-fullscreen .reader-content {
-  width: min(100%, var(--reader-measure));
+  width: min(100%, var(--reader-zoomed-measure));
   min-height: 100%;
   margin: 0 auto;
   padding:
@@ -1487,13 +1494,13 @@ body.reading-fullscreen .reader-content {
 }
 
 body.reading-fullscreen .reader-content.pdf-document {
-  width: 100%;
+  width: min(var(--reader-zoom-width), var(--pdf-document-max-width));
   max-width: none;
   padding: 0 0 max(22px, env(safe-area-inset-bottom));
 }
 
 body.reading-fullscreen .pdf-page {
-  width: min(100%, 980px);
+  width: min(100%, var(--pdf-full-page-max-width));
   margin-bottom: 12px;
   box-shadow: none;
 }
@@ -1566,18 +1573,19 @@ body.reading-fullscreen .pdf-page {
   }
 
   .reader-viewport {
-    overflow: visible;
+    overflow-x: auto;
+    overflow-y: visible;
   }
 
   .reader-content {
-    width: min(calc(100% - 24px), var(--reader-measure));
+    width: min(calc(100% - 24px), var(--reader-zoomed-measure));
     margin: 12px auto;
     padding: 24px 18px;
     box-shadow: 0 16px 44px rgba(30, 55, 66, 0.13);
   }
 
   .reader-content.pdf-document {
-    width: min(calc(100% - 16px), 100%);
+    width: min(calc(var(--reader-zoom-width) - 16px), var(--pdf-document-max-width));
     margin: 0 auto;
     padding: 12px 0 26px;
     box-shadow: none;

@@ -64,6 +64,7 @@ const defaultSettings = {
   theme: "day",
   fontSize: 20,
   measure: 740,
+  readerZoom: 1,
 };
 
 let state = {
@@ -86,6 +87,7 @@ let state = {
   saveTimer: null,
   syncTimer: null,
   toastTimer: null,
+  zoomTimer: null,
 };
 
 const wheelScrollSpeed = 4.2;
@@ -266,15 +268,58 @@ function saveSettings(partial) {
 
 function applySettings() {
   const settings = getSettings();
+  const readerZoom = clampReaderZoom(settings.readerZoom);
   els.body.dataset.theme = settings.theme;
   els.fontSize.value = settings.fontSize;
   els.measure.value = settings.measure;
   document.documentElement.style.setProperty("--reader-font-size", `${settings.fontSize}px`);
   document.documentElement.style.setProperty("--reader-measure", `${settings.measure}px`);
+  document.documentElement.style.setProperty("--reader-zoomed-font-size", `${settings.fontSize * readerZoom}px`);
+  document.documentElement.style.setProperty("--reader-zoomed-measure", `${settings.measure * readerZoom}px`);
+  document.documentElement.style.setProperty("--reader-zoom-width", `${readerZoom * 100}%`);
+  document.documentElement.style.setProperty("--pdf-document-max-width", `${1040 * readerZoom}px`);
+  document.documentElement.style.setProperty("--pdf-page-max-width", `${930 * readerZoom}px`);
+  document.documentElement.style.setProperty("--pdf-full-page-max-width", `${980 * readerZoom}px`);
 
   document.querySelectorAll("[data-theme-choice]").forEach((button) => {
     button.classList.toggle("active", button.dataset.themeChoice === settings.theme);
   });
+}
+
+function clampReaderZoom(value) {
+  const zoom = Number(value);
+  if (!Number.isFinite(zoom)) return 1;
+  return Math.min(2.4, Math.max(0.6, zoom));
+}
+
+function changeReaderZoom(deltaY) {
+  const settings = getSettings();
+  const currentZoom = clampReaderZoom(settings.readerZoom);
+  const direction = deltaY < 0 ? 1 : -1;
+  const nextZoom = clampReaderZoom(Math.round((currentZoom + direction * 0.1) * 10) / 10);
+  if (nextZoom === currentZoom) return;
+
+  const pdfPosition = state.pdf ? getCurrentPdfPosition() : null;
+  const progress = getReadingProgress();
+  saveSettings({ readerZoom: nextZoom });
+  applySettings();
+
+  requestAnimationFrame(() => {
+    if (pdfPosition) jumpToPdfPage(pdfPosition.pageNumber, pdfPosition.pageOffset);
+    else jumpToProgress(progress);
+  });
+
+  window.clearTimeout(state.zoomTimer);
+  state.zoomTimer = window.setTimeout(() => {
+    if (!state.pdf) return;
+    const anchor = getCurrentPdfPosition() || pdfPosition;
+    refreshPdfPagesForLayout();
+    requestAnimationFrame(() => {
+      if (anchor) jumpToPdfPage(anchor.pageNumber, anchor.pageOffset);
+    });
+  }, 180);
+
+  showToast(`Масштаб ${Math.round(nextZoom * 100)}%`);
 }
 
 function showToast(message) {
@@ -1805,7 +1850,13 @@ function bindEvents() {
 }
 
 function handleWheelScroll(event) {
-  if (event.ctrlKey || event.metaKey || event.defaultPrevented) return;
+  if (event.defaultPrevented) return;
+  if (event.ctrlKey || event.metaKey) {
+    if (!state.bookKey) return;
+    event.preventDefault();
+    changeReaderZoom(event.deltaY);
+    return;
+  }
   const target = event.target;
   if (target instanceof Element && target.closest("input[type='range']")) return;
 
