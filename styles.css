@@ -298,9 +298,11 @@ body.splash-done .app-splash {
 
 .sidebar {
   display: flex;
+  min-height: 0;
   min-width: 0;
   flex-direction: column;
   gap: 16px;
+  overflow: hidden;
   padding: 22px;
   border-right: 1px solid var(--subtle);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
@@ -524,10 +526,31 @@ body.splash-done .app-splash {
 }
 
 .panel-list {
-  min-height: 120px;
-  flex: 1;
-  overflow: auto;
+  min-height: 0;
+  flex: 1 1 120px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding-right: 4px;
+  scrollbar-color: color-mix(in srgb, var(--accent) 58%, var(--subtle)) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  touch-action: pan-y;
+}
+
+.panel-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.panel-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 58%, var(--subtle));
+  background-clip: padding-box;
 }
 
 .hidden {
@@ -1505,6 +1528,8 @@ body.reading-fullscreen .pdf-page {
   .sidebar,
   .app.sidebar-collapsed .sidebar {
     width: auto;
+    height: 100dvh;
+    max-height: 100dvh;
     padding: 16px;
     transform: none;
     border-right: 0;

@@ -88,7 +88,8 @@ let state = {
   toastTimer: null,
 };
 
-const wheelScrollSpeed = 2.6;
+const wheelScrollSpeed = 4.2;
+const sidebarWheelScrollSpeed = 1.35;
 const scriptLoaders = new Map();
 const splashMinimumMs = 1900;
 const splashStartedAt = getStartupNow();
@@ -1805,11 +1806,18 @@ function bindEvents() {
 
 function handleWheelScroll(event) {
   if (event.ctrlKey || event.metaKey || event.defaultPrevented) return;
-  const scrollTarget = getPrimaryScrollTarget();
-  if (!scrollTarget || scrollTarget.scrollHeight <= scrollTarget.clientHeight) return;
-
   const target = event.target;
   if (target instanceof Element && target.closest("input[type='range']")) return;
+
+  const panelList = target instanceof Element ? target.closest(".panel-list") : null;
+  if (panelList) {
+    event.preventDefault();
+    panelList.scrollTop += normalizeWheelDelta(event, panelList) * sidebarWheelScrollSpeed;
+    return;
+  }
+
+  const scrollTarget = getPrimaryScrollTarget();
+  if (!scrollTarget || scrollTarget.scrollHeight <= scrollTarget.clientHeight) return;
   if (target instanceof Element && canScrollInside(target, event.deltaY)) return;
 
   event.preventDefault();
