@@ -181,14 +181,14 @@ function sanitizeAnnotations(value) {
 
   Object.entries(value).slice(0, 500).forEach(([pageNumber, strokes]) => {
     if (!Array.isArray(strokes)) return;
-    const safeStrokes = strokes.slice(0, 800).map((stroke) => ({
+    const safeStrokes = strokes.slice(0, 2500).map((stroke) => ({
       id: String(stroke?.id || "").slice(0, 80),
       color: /^#[0-9a-f]{6}$/i.test(stroke?.color || "") ? stroke.color : "#e0523f",
       width: Math.max(0.0005, Math.min(0.08, Number(stroke?.width || 0.008))),
       opacity: Math.max(0.1, Math.min(1, Number(stroke?.opacity || 0.62))),
       createdAt: Number(stroke?.createdAt || Date.now()),
       points: Array.isArray(stroke?.points)
-        ? stroke.points.slice(0, 3000).map((point) => ({
+        ? stroke.points.slice(0, 5000).map((point) => ({
             x: Math.max(0, Math.min(1, Number(point?.x || 0))),
             y: Math.max(0, Math.min(1, Number(point?.y || 0))),
           }))

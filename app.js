@@ -88,6 +88,9 @@ let state = {
   annotationTool: "marker",
   activeAnnotationStroke: null,
   annotationPointerId: null,
+  annotationsDirty: false,
+  annotationRenderFrame: null,
+  annotationRenderPages: new Set(),
   pdf: null,
   pdfObserver: null,
   pdfRenderToken: 0,
@@ -640,9 +643,13 @@ function applyRemoteData(remoteData, { restoreCurrentBook = false } = {}) {
   if (restoreCurrentBook && state.bookKey && store.books?.[state.bookKey]) {
     const saved = store.books[state.bookKey];
     state.bookmarks = saved.bookmarks || [];
-    state.annotations = normalizeAnnotations(saved.annotations);
+    const nextAnnotations = normalizeAnnotations(saved.annotations);
+    const canApplyRemoteAnnotations = !state.annotationsDirty && !state.activeAnnotationStroke;
+    if (canApplyRemoteAnnotations && !annotationMapsMatch(state.annotations, nextAnnotations)) {
+      state.annotations = nextAnnotations;
+      requestAnimationFrame(refreshVisibleAnnotationCanvases);
+    }
     updateBookmarksPanel();
-    requestAnimationFrame(refreshVisibleAnnotationCanvases);
 
     if (typeof saved.progress === "number") {
       const maxScroll = Math.max(1, els.readerViewport.scrollHeight - els.readerViewport.clientHeight);
@@ -717,6 +724,26 @@ function mergeAnnotationMaps(remoteAnnotations, localAnnotations) {
   });
 
   return merged;
+}
+
+function annotationMapsMatch(leftAnnotations, rightAnnotations) {
+  const left = leftAnnotations || {};
+  const right = rightAnnotations || {};
+  const pageNumbers = new Set([...Object.keys(left), ...Object.keys(right)]);
+
+  for (const pageNumber of pageNumbers) {
+    const leftStrokes = left[pageNumber] || [];
+    const rightStrokes = right[pageNumber] || [];
+    if (leftStrokes.length !== rightStrokes.length) return false;
+
+    for (let index = 0; index < leftStrokes.length; index += 1) {
+      const leftStroke = leftStrokes[index];
+      const rightStroke = rightStrokes[index];
+      if (leftStroke.id !== rightStroke.id || leftStroke.points.length !== rightStroke.points.length) return false;
+    }
+  }
+
+  return true;
 }
 
 function setLoading(fileName) {
@@ -1415,14 +1442,14 @@ function normalizeAnnotations(value) {
 
   Object.entries(value).slice(0, 500).forEach(([pageNumber, strokes]) => {
     if (!Array.isArray(strokes)) return;
-    const safeStrokes = strokes.slice(0, 800).map((stroke) => ({
+    const safeStrokes = strokes.slice(0, 2500).map((stroke) => ({
       id: String(stroke?.id || "").slice(0, 80),
       color: /^#[0-9a-f]{6}$/i.test(stroke?.color || "") ? stroke.color : "#e0523f",
       width: Math.max(0.0005, Math.min(0.08, Number(stroke?.width || 0.008))),
       opacity: Math.max(0.1, Math.min(1, Number(stroke?.opacity || 0.62))),
       createdAt: Number(stroke?.createdAt || Date.now()),
       points: Array.isArray(stroke?.points)
-        ? stroke.points.slice(0, 3000).map((point) => ({
+        ? stroke.points.slice(0, 5000).map((point) => ({
             x: clamp01(point?.x),
             y: clamp01(point?.y),
           }))
@@ -1503,10 +1530,11 @@ function handleAnnotationPointerDown(event) {
     createdAt: Date.now(),
     points: [point],
   };
+  state.annotationsDirty = true;
   state.annotations[pageNumber] = state.annotations[pageNumber] || [];
   state.annotations[pageNumber].push(stroke);
   state.activeAnnotationStroke = { pageNumber, stroke };
-  renderAnnotationPage(pageNumber);
+  drawLiveAnnotationSegment(pageNumber, stroke, point, point);
 }
 
 function handleAnnotationPointerMove(event) {
@@ -1525,16 +1553,21 @@ function handleAnnotationPointerMove(event) {
 
   const previous = stroke.points.at(-1);
   const distance = Math.hypot(point.x - previous.x, point.y - previous.y);
-  if (distance < 0.0015 || stroke.points.length >= 3000) return;
+  if (distance < 0.0015 || stroke.points.length >= 5000) return;
   stroke.points.push(point);
-  renderAnnotationPage(pageNumber);
+  drawLiveAnnotationSegment(pageNumber, stroke, previous, point);
 }
 
 function finishAnnotationPointer(event) {
   if (event.pointerId !== state.annotationPointerId) return;
   event.preventDefault();
+  const pageNumber = state.activeAnnotationStroke?.pageNumber;
   state.activeAnnotationStroke = null;
   state.annotationPointerId = null;
+  if (pageNumber) {
+    state.annotationRenderPages.delete(Number(pageNumber));
+    renderAnnotationPage(pageNumber);
+  }
   scheduleSaveProgress();
 }
 
@@ -1556,8 +1589,9 @@ function eraseAnnotationAt(pageNumber, point, pageWidth) {
     const stroke = strokes[index];
     if (stroke.points.some((strokePoint) => Math.hypot(strokePoint.x - point.x, strokePoint.y - point.y) <= radius + stroke.width)) {
       strokes.splice(index, 1);
+      state.annotationsDirty = true;
       if (!strokes.length) delete state.annotations[pageNumber];
-      renderAnnotationPage(pageNumber);
+      scheduleAnnotationPageRender(pageNumber);
       return;
     }
   }
@@ -1577,26 +1611,89 @@ function ensureAnnotationCanvas(pageNumber) {
   return canvas;
 }
 
+function getAnnotationCanvasMetrics(pageNumber) {
+  const page = document.getElementById(`pdf-page-${pageNumber}`);
+  const canvas = ensureAnnotationCanvas(pageNumber);
+  if (!page || !canvas) return null;
+
+  const width = Math.max(1, page.clientWidth);
+  const height = Math.max(1, page.clientHeight);
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelWidth = Math.round(width * pixelRatio);
+  const pixelHeight = Math.round(height * pixelRatio);
+  const resized = canvas.width !== pixelWidth || canvas.height !== pixelHeight;
+  if (resized) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+
+  return { canvas, width, height, pixelRatio, resized };
+}
+
+function drawLiveAnnotationSegment(pageNumber, stroke, startPoint, endPoint) {
+  const metrics = getAnnotationCanvasMetrics(pageNumber);
+  if (!metrics) return;
+  if (metrics.resized) {
+    renderAnnotationPage(pageNumber);
+    return;
+  }
+
+  const { canvas, width, height, pixelRatio } = metrics;
+  const context = canvas.getContext("2d");
+  context.save();
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.globalAlpha = stroke.opacity;
+  context.strokeStyle = stroke.color;
+  context.fillStyle = stroke.color;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = Math.max(1, stroke.width * width);
+
+  if (startPoint === endPoint) {
+    context.beginPath();
+    context.arc(startPoint.x * width, startPoint.y * height, context.lineWidth / 2, 0, Math.PI * 2);
+    context.fill();
+  } else {
+    context.beginPath();
+    context.moveTo(startPoint.x * width, startPoint.y * height);
+    context.lineTo(endPoint.x * width, endPoint.y * height);
+    context.stroke();
+  }
+  context.restore();
+}
+
+function scheduleAnnotationPageRender(pageNumber) {
+  state.annotationRenderPages.add(Number(pageNumber));
+  if (state.annotationRenderFrame) return;
+
+  state.annotationRenderFrame = requestAnimationFrame(() => {
+    const pageNumbers = [...state.annotationRenderPages];
+    state.annotationRenderPages.clear();
+    state.annotationRenderFrame = null;
+    pageNumbers.forEach(renderAnnotationPage);
+  });
+}
+
 function renderAnnotationPage(pageNumber) {
   const strokes = state.annotations[pageNumber] || [];
   const page = document.getElementById(`pdf-page-${pageNumber}`);
   if (!page) return;
   const existingCanvas = page.querySelector(".pdf-annotation-canvas");
   if (!strokes.length) {
-    existingCanvas?.remove();
+    if (existingCanvas && state.annotationMode) {
+      const context = existingCanvas.getContext("2d");
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, existingCanvas.width, existingCanvas.height);
+    } else {
+      existingCanvas?.remove();
+    }
     return;
   }
 
-  const canvas = existingCanvas || ensureAnnotationCanvas(pageNumber);
-  const width = Math.max(1, page.clientWidth);
-  const height = Math.max(1, page.clientHeight);
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-  const pixelWidth = Math.round(width * pixelRatio);
-  const pixelHeight = Math.round(height * pixelRatio);
-  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-    canvas.width = pixelWidth;
-    canvas.height = pixelHeight;
-  }
+  if (!existingCanvas) ensureAnnotationCanvas(pageNumber);
+  const metrics = getAnnotationCanvasMetrics(pageNumber);
+  if (!metrics) return;
+  const { canvas, width, height, pixelRatio } = metrics;
 
   const context = canvas.getContext("2d");
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
@@ -1654,6 +1751,7 @@ function undoAnnotation() {
     return;
   }
   strokes.pop();
+  state.annotationsDirty = true;
   if (!strokes.length) delete state.annotations[pageNumber];
   renderAnnotationPage(pageNumber);
   scheduleSaveProgress();
@@ -1667,6 +1765,7 @@ function clearCurrentPageAnnotations() {
     showToast("На этой странице нет штрихов");
     return;
   }
+  state.annotationsDirty = true;
   delete state.annotations[pageNumber];
   renderAnnotationPage(pageNumber);
   scheduleSaveProgress();
@@ -1676,6 +1775,10 @@ function clearCurrentPageAnnotations() {
 function renderBook(html, title, ext, meta = {}) {
   const isPdf = ext === "pdf" || meta.isPdf;
   state.annotations = {};
+  state.annotationsDirty = false;
+  state.annotationRenderPages.clear();
+  if (state.annotationRenderFrame) cancelAnimationFrame(state.annotationRenderFrame);
+  state.annotationRenderFrame = null;
   setAnnotationMode(false, { silent: true });
   state.pdfObserver?.disconnect();
   state.pdf = null;
@@ -1801,6 +1904,7 @@ function persistCurrentBookState({ sync = true } = {}) {
     updatedAt: Date.now(),
   };
   saveStore(store);
+  if (!state.activeAnnotationStroke) state.annotationsDirty = false;
   if (sync) scheduleCloudSync();
   els.savedText.textContent = `Сохранено ${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
   return true;
@@ -1819,6 +1923,7 @@ function restoreBookState() {
   const saved = store.books?.[state.bookKey];
   state.bookmarks = saved?.bookmarks || [];
   state.annotations = normalizeAnnotations(saved?.annotations);
+  state.annotationsDirty = false;
   updateBookmarksPanel();
   requestAnimationFrame(refreshVisibleAnnotationCanvases);
 
