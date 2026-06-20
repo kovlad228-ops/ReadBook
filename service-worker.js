@@ -1,9 +1,9 @@
-const cacheName = "litera-reader-app-v13";
+const cacheName = "litera-reader-app-v14";
 const appShell = [
   "/",
   "/index.html",
-  "/styles.css?v=20260620-4",
-  "/app.js?v=20260620-4",
+  "/styles.css?v=20260620-5",
+  "/app.js?v=20260620-5",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",

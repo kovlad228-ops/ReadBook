@@ -319,24 +319,25 @@ function changeReaderZoom(deltaY) {
   const nextZoom = clampReaderZoom(Math.round((currentZoom + direction * 0.1) * 10) / 10);
   if (nextZoom === currentZoom) return;
 
-  const pdfPosition = state.pdf ? getCurrentPdfPosition() : null;
-  const progress = getReadingProgress();
+  const scrollTarget = getPrimaryScrollTarget();
+  const scrollPosition = scrollTarget
+    ? { top: scrollTarget.scrollTop, left: scrollTarget.scrollLeft }
+    : null;
+  const restoreScrollPosition = () => {
+    if (!scrollTarget || !scrollPosition) return;
+    scrollTarget.scrollTop = scrollPosition.top;
+    scrollTarget.scrollLeft = scrollPosition.left;
+  };
+
   saveSettings({ readerZoom: nextZoom });
   applySettings();
-
-  requestAnimationFrame(() => {
-    if (pdfPosition) jumpToPdfPage(pdfPosition.pageNumber, pdfPosition.pageOffset);
-    else jumpToProgress(progress);
-  });
+  restoreScrollPosition();
+  requestAnimationFrame(restoreScrollPosition);
 
   window.clearTimeout(state.zoomTimer);
   state.zoomTimer = window.setTimeout(() => {
-    if (!state.pdf) return;
-    const anchor = getCurrentPdfPosition() || pdfPosition;
-    refreshPdfPagesForLayout();
-    requestAnimationFrame(() => {
-      if (anchor) jumpToPdfPage(anchor.pageNumber, anchor.pageOffset);
-    });
+    if (state.pdf) refreshPdfPagesForLayout();
+    requestAnimationFrame(restoreScrollPosition);
   }, 180);
 
   showToast(`Масштаб ${Math.round(nextZoom * 100)}%`);
@@ -2204,7 +2205,7 @@ function handleWheelScroll(event) {
   if (event.defaultPrevented) return;
   if (isReaderZoomGesture(event)) {
     event.preventDefault();
-    event.stopPropagation();
+    event.stopImmediatePropagation();
     if (state.bookKey && event.deltaY !== 0) changeReaderZoom(event.deltaY);
     return;
   }
