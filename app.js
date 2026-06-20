@@ -84,6 +84,7 @@ let state = {
   authMode: "login",
   auth: null,
   readingFullscreen: false,
+  zoomModifierPressed: false,
   saveTimer: null,
   syncTimer: null,
   toastTimer: null,
@@ -1783,7 +1784,7 @@ function bindEvents() {
   });
 
   els.readerViewport.addEventListener("scroll", updateProgress, { passive: true });
-  document.addEventListener("wheel", handleWheelScroll, { passive: false });
+  document.addEventListener("wheel", handleWheelScroll, { passive: false, capture: true });
   window.addEventListener("resize", updateProgress);
 
   els.tocPanel.addEventListener("click", (event) => {
@@ -1835,11 +1836,18 @@ function bindEvents() {
     if (event.target === els.authModal) closeAuthModal();
   });
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Control" || event.key === "Meta") state.zoomModifierPressed = true;
     if (event.key === "Escape" && state.readingFullscreen) {
       exitReadingFullscreen();
       return;
     }
     if (event.key === "Escape" && !els.authModal.classList.contains("hidden")) closeAuthModal();
+  });
+  document.addEventListener("keyup", (event) => {
+    if (event.key === "Control" || event.key === "Meta") state.zoomModifierPressed = false;
+  });
+  window.addEventListener("blur", () => {
+    state.zoomModifierPressed = false;
   });
   document.addEventListener("fullscreenchange", () => {
     if (!document.fullscreenElement && state.readingFullscreen) applyReadingFullscreen(false);
@@ -1851,10 +1859,10 @@ function bindEvents() {
 
 function handleWheelScroll(event) {
   if (event.defaultPrevented) return;
-  if (event.ctrlKey || event.metaKey) {
-    if (!state.bookKey) return;
+  if (isReaderZoomGesture(event)) {
     event.preventDefault();
-    changeReaderZoom(event.deltaY);
+    event.stopPropagation();
+    if (state.bookKey && event.deltaY !== 0) changeReaderZoom(event.deltaY);
     return;
   }
   const target = event.target;
@@ -1873,6 +1881,16 @@ function handleWheelScroll(event) {
 
   event.preventDefault();
   scrollTarget.scrollTop += normalizeWheelDelta(event, scrollTarget) * wheelScrollSpeed;
+}
+
+function isReaderZoomGesture(event) {
+  return Boolean(
+    event.ctrlKey ||
+      event.metaKey ||
+      state.zoomModifierPressed ||
+      event.getModifierState?.("Control") ||
+      event.getModifierState?.("Meta"),
+  );
 }
 
 function getPrimaryScrollTarget() {
