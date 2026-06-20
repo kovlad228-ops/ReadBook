@@ -21,6 +21,14 @@ const els = {
   marksTab: document.getElementById("marksTab"),
   sidebarToggle: document.getElementById("sidebarToggle"),
   fullscreenButton: document.getElementById("fullscreenButton"),
+  annotationButton: document.getElementById("annotationButton"),
+  fullscreenAnnotationButton: document.getElementById("fullscreenAnnotationButton"),
+  annotationToolbar: document.getElementById("annotationToolbar"),
+  annotationSize: document.getElementById("annotationSize"),
+  annotationEraser: document.getElementById("annotationEraser"),
+  annotationUndo: document.getElementById("annotationUndo"),
+  annotationClear: document.getElementById("annotationClear"),
+  annotationClose: document.getElementById("annotationClose"),
   fullscreenBookmarkButton: document.getElementById("fullscreenBookmarkButton"),
   fullscreenExit: document.getElementById("fullscreenExit"),
   fontSize: document.getElementById("fontSize"),
@@ -65,6 +73,8 @@ const defaultSettings = {
   fontSize: 20,
   measure: 740,
   readerZoom: 1,
+  annotationColor: "#e0523f",
+  annotationSize: 8,
 };
 
 let state = {
@@ -73,6 +83,11 @@ let state = {
   format: "",
   toc: [],
   bookmarks: [],
+  annotations: {},
+  annotationMode: false,
+  annotationTool: "marker",
+  activeAnnotationStroke: null,
+  annotationPointerId: null,
   pdf: null,
   pdfObserver: null,
   pdfRenderToken: 0,
@@ -273,6 +288,7 @@ function applySettings() {
   els.body.dataset.theme = settings.theme;
   els.fontSize.value = settings.fontSize;
   els.measure.value = settings.measure;
+  els.annotationSize.value = settings.annotationSize;
   document.documentElement.style.setProperty("--reader-font-size", `${settings.fontSize}px`);
   document.documentElement.style.setProperty("--reader-measure", `${settings.measure}px`);
   document.documentElement.style.setProperty("--reader-zoomed-font-size", `${settings.fontSize * readerZoom}px`);
@@ -284,6 +300,9 @@ function applySettings() {
 
   document.querySelectorAll("[data-theme-choice]").forEach((button) => {
     button.classList.toggle("active", button.dataset.themeChoice === settings.theme);
+  });
+  document.querySelectorAll("[data-annotation-color]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.annotationColor === settings.annotationColor);
   });
 }
 
@@ -620,7 +639,9 @@ function applyRemoteData(remoteData, { restoreCurrentBook = false } = {}) {
   if (restoreCurrentBook && state.bookKey && store.books?.[state.bookKey]) {
     const saved = store.books[state.bookKey];
     state.bookmarks = saved.bookmarks || [];
+    state.annotations = normalizeAnnotations(saved.annotations);
     updateBookmarksPanel();
+    requestAnimationFrame(refreshVisibleAnnotationCanvases);
 
     if (typeof saved.progress === "number") {
       const maxScroll = Math.max(1, els.readerViewport.scrollHeight - els.readerViewport.clientHeight);
@@ -674,8 +695,27 @@ function mergeBookData(localBook, remoteBook) {
   return {
     ...localBook,
     bookmarks: [...marks.values()].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)),
+    annotations: mergeAnnotationMaps(remoteBook.annotations, localBook.annotations),
     updatedAt: localUpdatedAt,
   };
+}
+
+function mergeAnnotationMaps(remoteAnnotations, localAnnotations) {
+  const merged = {};
+  const remote = normalizeAnnotations(remoteAnnotations);
+  const local = normalizeAnnotations(localAnnotations);
+  const pageNumbers = new Set([...Object.keys(remote), ...Object.keys(local)]);
+
+  pageNumbers.forEach((pageNumber) => {
+    const strokes = new Map();
+    [...(remote[pageNumber] || []), ...(local[pageNumber] || [])].forEach((stroke) => {
+      if (!stroke.id) return;
+      strokes.set(stroke.id, stroke);
+    });
+    if (strokes.size) merged[pageNumber] = [...strokes.values()].sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+  });
+
+  return merged;
 }
 
 function setLoading(fileName) {
@@ -1234,6 +1274,7 @@ function startPdfRendering(pdf, pageCount) {
       if (!entry.isIntersecting) return;
       const pageNumber = Number(entry.target.dataset.page);
       queuePdfPageRender(pageNumber, token);
+      renderAnnotationPage(pageNumber);
     });
   };
 
@@ -1283,7 +1324,7 @@ async function renderPdfPage(pageNumber, token) {
   if (!state.pdf || state.renderedPdfPages.has(pageNumber)) return;
 
   const section = els.readerContent.querySelector(`[data-page="${pageNumber}"]`);
-  const canvas = section?.querySelector("canvas");
+  const canvas = section?.querySelector(".pdf-canvas");
   if (!section || !canvas) return;
 
   section.classList.add("is-rendering");
@@ -1312,6 +1353,7 @@ async function renderPdfPage(pageNumber, token) {
     state.renderedPdfPages.add(pageNumber);
     section.classList.remove("is-rendering");
     section.classList.add("is-rendered");
+    renderAnnotationPage(pageNumber);
   } catch (error) {
     console.error(error);
     section.classList.remove("is-rendering");
@@ -1334,11 +1376,12 @@ function trimPdfCanvasCache(anchorPageNumber = getCurrentPdfPageNumber()) {
 
 function clearPdfPageCanvas(pageNumber) {
   const section = els.readerContent.querySelector(`[data-page="${pageNumber}"]`);
-  const canvas = section?.querySelector("canvas");
+  const canvas = section?.querySelector(".pdf-canvas");
   if (!section || !canvas) return;
 
   canvas.width = 1;
   canvas.height = 1;
+  section.querySelector(".pdf-annotation-canvas")?.remove();
   section.classList.remove("is-rendering", "is-rendered", "is-failed");
   state.renderedPdfPages.delete(pageNumber);
 }
@@ -1365,8 +1408,274 @@ function getCurrentPdfPageNumber() {
   return currentPage;
 }
 
+function normalizeAnnotations(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result = {};
+
+  Object.entries(value).slice(0, 500).forEach(([pageNumber, strokes]) => {
+    if (!Array.isArray(strokes)) return;
+    const safeStrokes = strokes.slice(0, 800).map((stroke) => ({
+      id: String(stroke?.id || "").slice(0, 80),
+      color: /^#[0-9a-f]{6}$/i.test(stroke?.color || "") ? stroke.color : "#e0523f",
+      width: Math.max(0.0005, Math.min(0.08, Number(stroke?.width || 0.008))),
+      opacity: Math.max(0.1, Math.min(1, Number(stroke?.opacity || 0.62))),
+      createdAt: Number(stroke?.createdAt || Date.now()),
+      points: Array.isArray(stroke?.points)
+        ? stroke.points.slice(0, 3000).map((point) => ({
+            x: clamp01(point?.x),
+            y: clamp01(point?.y),
+          }))
+        : [],
+    })).filter((stroke) => stroke.id && stroke.points.length);
+    if (safeStrokes.length) result[String(pageNumber)] = safeStrokes;
+  });
+
+  return result;
+}
+
+function toggleAnnotationMode() {
+  if (!state.pdf) {
+    showToast("Рисование доступно для PDF");
+    return;
+  }
+  setAnnotationMode(!state.annotationMode);
+}
+
+function setAnnotationMode(active, { silent = false } = {}) {
+  const enabled = Boolean(active && state.pdf);
+  if (active && !enabled && !silent) showToast("Рисование доступно для PDF");
+  state.annotationMode = enabled;
+  state.activeAnnotationStroke = null;
+  state.annotationPointerId = null;
+  els.body.classList.toggle("annotation-mode", enabled);
+  els.annotationToolbar.classList.toggle("hidden", !enabled);
+  [els.annotationButton, els.fullscreenAnnotationButton].forEach((button) => {
+    button.classList.toggle("active", enabled);
+    button.setAttribute("aria-pressed", String(enabled));
+  });
+  updateAnnotationToolUi();
+  if (enabled) refreshVisibleAnnotationCanvases();
+  refreshIcons();
+}
+
+function setAnnotationTool(tool) {
+  state.annotationTool = tool === "eraser" ? "eraser" : "marker";
+  updateAnnotationToolUi();
+}
+
+function updateAnnotationToolUi() {
+  const erasing = state.annotationTool === "eraser";
+  els.annotationEraser.classList.toggle("active", erasing);
+  els.annotationEraser.setAttribute("aria-pressed", String(erasing));
+}
+
+function handleAnnotationPointerDown(event) {
+  if (!state.annotationMode || !state.pdf || event.button !== 0) return;
+  const page = event.target.closest(".pdf-page");
+  if (!page) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  const pageNumber = Number(page.dataset.page);
+  const point = getAnnotationPoint(event, page);
+  const canvas = ensureAnnotationCanvas(pageNumber);
+  state.annotationPointerId = event.pointerId;
+
+  try {
+    canvas?.setPointerCapture(event.pointerId);
+  } catch {
+    // Pointer capture is optional on older touch browsers.
+  }
+
+  if (state.annotationTool === "eraser") {
+    state.activeAnnotationStroke = { pageNumber, erasing: true };
+    eraseAnnotationAt(pageNumber, point, page.clientWidth);
+    return;
+  }
+
+  const settings = getSettings();
+  const stroke = {
+    id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+    color: settings.annotationColor,
+    width: Math.max(0.0005, Number(settings.annotationSize || 8) / Math.max(1, page.clientWidth)),
+    opacity: settings.annotationColor === "#20242a" ? 0.88 : 0.62,
+    createdAt: Date.now(),
+    points: [point],
+  };
+  state.annotations[pageNumber] = state.annotations[pageNumber] || [];
+  state.annotations[pageNumber].push(stroke);
+  state.activeAnnotationStroke = { pageNumber, stroke };
+  renderAnnotationPage(pageNumber);
+}
+
+function handleAnnotationPointerMove(event) {
+  if (!state.annotationMode || event.pointerId !== state.annotationPointerId || !state.activeAnnotationStroke) return;
+  const { pageNumber, stroke, erasing } = state.activeAnnotationStroke;
+  const page = document.getElementById(`pdf-page-${pageNumber}`);
+  if (!page) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  const point = getAnnotationPoint(event, page);
+  if (erasing) {
+    eraseAnnotationAt(pageNumber, point, page.clientWidth);
+    return;
+  }
+
+  const previous = stroke.points.at(-1);
+  const distance = Math.hypot(point.x - previous.x, point.y - previous.y);
+  if (distance < 0.0015 || stroke.points.length >= 3000) return;
+  stroke.points.push(point);
+  renderAnnotationPage(pageNumber);
+}
+
+function finishAnnotationPointer(event) {
+  if (event.pointerId !== state.annotationPointerId) return;
+  event.preventDefault();
+  state.activeAnnotationStroke = null;
+  state.annotationPointerId = null;
+  scheduleSaveProgress();
+}
+
+function getAnnotationPoint(event, page) {
+  const rect = page.getBoundingClientRect();
+  return {
+    x: clamp01((event.clientX - rect.left) / Math.max(1, rect.width)),
+    y: clamp01((event.clientY - rect.top) / Math.max(1, rect.height)),
+  };
+}
+
+function eraseAnnotationAt(pageNumber, point, pageWidth) {
+  const strokes = state.annotations[pageNumber];
+  if (!strokes?.length) return;
+  const size = Number(getSettings().annotationSize || 8);
+  const radius = Math.max(0.008, (size * 1.8) / Math.max(1, pageWidth));
+
+  for (let index = strokes.length - 1; index >= 0; index -= 1) {
+    const stroke = strokes[index];
+    if (stroke.points.some((strokePoint) => Math.hypot(strokePoint.x - point.x, strokePoint.y - point.y) <= radius + stroke.width)) {
+      strokes.splice(index, 1);
+      if (!strokes.length) delete state.annotations[pageNumber];
+      renderAnnotationPage(pageNumber);
+      return;
+    }
+  }
+}
+
+function ensureAnnotationCanvas(pageNumber) {
+  const page = document.getElementById(`pdf-page-${pageNumber}`);
+  if (!page) return null;
+  let canvas = page.querySelector(".pdf-annotation-canvas");
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.className = "pdf-annotation-canvas";
+    canvas.dataset.annotationPage = String(pageNumber);
+    canvas.setAttribute("aria-hidden", "true");
+    page.append(canvas);
+  }
+  return canvas;
+}
+
+function renderAnnotationPage(pageNumber) {
+  const strokes = state.annotations[pageNumber] || [];
+  const page = document.getElementById(`pdf-page-${pageNumber}`);
+  if (!page) return;
+  const existingCanvas = page.querySelector(".pdf-annotation-canvas");
+  if (!strokes.length) {
+    existingCanvas?.remove();
+    return;
+  }
+
+  const canvas = existingCanvas || ensureAnnotationCanvas(pageNumber);
+  const width = Math.max(1, page.clientWidth);
+  const height = Math.max(1, page.clientHeight);
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelWidth = Math.round(width * pixelRatio);
+  const pixelHeight = Math.round(height * pixelRatio);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+
+  const context = canvas.getContext("2d");
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  strokes.forEach((stroke) => drawAnnotationStroke(context, stroke, width, height));
+}
+
+function drawAnnotationStroke(context, stroke, width, height) {
+  if (!stroke.points.length) return;
+  context.save();
+  context.globalAlpha = stroke.opacity;
+  context.strokeStyle = stroke.color;
+  context.fillStyle = stroke.color;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = Math.max(1, stroke.width * width);
+
+  if (stroke.points.length === 1) {
+    const point = stroke.points[0];
+    context.beginPath();
+    context.arc(point.x * width, point.y * height, context.lineWidth / 2, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+    return;
+  }
+
+  context.beginPath();
+  context.moveTo(stroke.points[0].x * width, stroke.points[0].y * height);
+  for (let index = 1; index < stroke.points.length - 1; index += 1) {
+    const point = stroke.points[index];
+    const next = stroke.points[index + 1];
+    context.quadraticCurveTo(point.x * width, point.y * height, ((point.x + next.x) / 2) * width, ((point.y + next.y) / 2) * height);
+  }
+  const last = stroke.points.at(-1);
+  context.lineTo(last.x * width, last.y * height);
+  context.stroke();
+  context.restore();
+}
+
+function refreshVisibleAnnotationCanvases() {
+  if (!state.pdf) return;
+  const currentPage = getCurrentPdfPageNumber();
+  for (let pageNumber = Math.max(1, currentPage - 2); pageNumber <= Math.min(state.pdf.numPages, currentPage + 2); pageNumber += 1) {
+    renderAnnotationPage(pageNumber);
+  }
+  els.readerContent.querySelectorAll(".pdf-annotation-canvas").forEach((canvas) => renderAnnotationPage(Number(canvas.dataset.annotationPage)));
+}
+
+function undoAnnotation() {
+  if (!state.pdf) return;
+  const pageNumber = getCurrentPdfPageNumber();
+  const strokes = state.annotations[pageNumber];
+  if (!strokes?.length) {
+    showToast("На этой странице нет штрихов");
+    return;
+  }
+  strokes.pop();
+  if (!strokes.length) delete state.annotations[pageNumber];
+  renderAnnotationPage(pageNumber);
+  scheduleSaveProgress();
+  showToast("Последний штрих отменён");
+}
+
+function clearCurrentPageAnnotations() {
+  if (!state.pdf) return;
+  const pageNumber = getCurrentPdfPageNumber();
+  if (!state.annotations[pageNumber]?.length) {
+    showToast("На этой странице нет штрихов");
+    return;
+  }
+  delete state.annotations[pageNumber];
+  renderAnnotationPage(pageNumber);
+  scheduleSaveProgress();
+  showToast(`Страница ${pageNumber} очищена`);
+}
+
 function renderBook(html, title, ext, meta = {}) {
   const isPdf = ext === "pdf" || meta.isPdf;
+  state.annotations = {};
+  setAnnotationMode(false, { silent: true });
   state.pdfObserver?.disconnect();
   state.pdf = null;
   state.renderedPdfPages = new Set();
@@ -1487,6 +1796,7 @@ function persistCurrentBookState({ sync = true } = {}) {
     format: state.format,
     progress: els.readerViewport.scrollTop / maxScroll,
     bookmarks: state.bookmarks,
+    annotations: state.annotations,
     updatedAt: Date.now(),
   };
   saveStore(store);
@@ -1507,7 +1817,9 @@ function restoreBookState() {
   const store = loadStore();
   const saved = store.books?.[state.bookKey];
   state.bookmarks = saved?.bookmarks || [];
+  state.annotations = normalizeAnnotations(saved?.annotations);
   updateBookmarksPanel();
+  requestAnimationFrame(refreshVisibleAnnotationCanvases);
 
   if (saved?.progress) {
     requestAnimationFrame(() => {
@@ -1660,7 +1972,7 @@ function openBookmark(mark) {
 function refreshPdfPagesForLayout() {
   if (!state.pdf) return;
   els.readerContent.querySelectorAll(".pdf-page").forEach((page) => {
-    const canvas = page.querySelector("canvas");
+    const canvas = page.querySelector(".pdf-canvas");
     page.classList.remove("is-rendering", "is-rendered", "is-failed");
     if (canvas) {
       canvas.removeAttribute("width");
@@ -1668,6 +1980,7 @@ function refreshPdfPagesForLayout() {
     }
   });
   startPdfRendering(state.pdf, els.readerContent.querySelectorAll(".pdf-page").length);
+  requestAnimationFrame(refreshVisibleAnnotationCanvases);
 }
 
 function applyReadingFullscreen(active, progress = getReadingProgress()) {
@@ -1783,9 +2096,29 @@ function bindEvents() {
     applySettings();
   });
 
+  document.querySelectorAll("[data-annotation-color]").forEach((button) => {
+    button.addEventListener("click", () => {
+      saveSettings({ annotationColor: button.dataset.annotationColor });
+      setAnnotationTool("marker");
+      applySettings();
+    });
+  });
+
+  els.annotationSize.addEventListener("input", () => {
+    saveSettings({ annotationSize: Number(els.annotationSize.value) });
+  });
+
   els.readerViewport.addEventListener("scroll", updateProgress, { passive: true });
   document.addEventListener("wheel", handleWheelScroll, { passive: false, capture: true });
-  window.addEventListener("resize", updateProgress);
+  window.addEventListener("resize", () => {
+    updateProgress();
+    requestAnimationFrame(refreshVisibleAnnotationCanvases);
+  });
+
+  els.readerContent.addEventListener("pointerdown", handleAnnotationPointerDown);
+  els.readerContent.addEventListener("pointermove", handleAnnotationPointerMove);
+  els.readerContent.addEventListener("pointerup", finishAnnotationPointer);
+  els.readerContent.addEventListener("pointercancel", finishAnnotationPointer);
 
   els.tocPanel.addEventListener("click", (event) => {
     const button = event.target.closest(".toc-item");
@@ -1815,6 +2148,12 @@ function bindEvents() {
   els.tocTab.addEventListener("click", () => switchTab("toc"));
   els.marksTab.addEventListener("click", () => switchTab("marks"));
   els.sidebarToggle.addEventListener("click", () => els.app.classList.toggle("sidebar-collapsed"));
+  els.annotationButton.addEventListener("click", toggleAnnotationMode);
+  els.fullscreenAnnotationButton.addEventListener("click", toggleAnnotationMode);
+  els.annotationClose.addEventListener("click", () => setAnnotationMode(false));
+  els.annotationEraser.addEventListener("click", () => setAnnotationTool(state.annotationTool === "eraser" ? "marker" : "eraser"));
+  els.annotationUndo.addEventListener("click", undoAnnotation);
+  els.annotationClear.addEventListener("click", clearCurrentPageAnnotations);
   els.fullscreenButton.addEventListener("click", toggleReadingFullscreen);
   els.fullscreenBookmarkButton.addEventListener("click", addBookmark);
   els.fullscreenExit.addEventListener("click", exitReadingFullscreen);
@@ -1837,6 +2176,10 @@ function bindEvents() {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Control" || event.key === "Meta") state.zoomModifierPressed = true;
+    if (event.key === "Escape" && state.annotationMode) {
+      setAnnotationMode(false);
+      return;
+    }
     if (event.key === "Escape" && state.readingFullscreen) {
       exitReadingFullscreen();
       return;

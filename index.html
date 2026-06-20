@@ -9,9 +9,9 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
     <link rel="apple-touch-icon" href="./icons/icon-192.png" />
-    <link rel="stylesheet" href="./styles.css?v=20260620-3" />
+    <link rel="stylesheet" href="./styles.css?v=20260620-4" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-    <script defer src="./app.js?v=20260620-3"></script>
+    <script defer src="./app.js?v=20260620-4"></script>
   </head>
   <body data-theme="day">
     <div class="app-splash" id="appSplash" role="status" aria-label="Загрузка Litera">
@@ -119,6 +119,9 @@
               <i data-lucide="move-horizontal"></i>
               <input id="measure" type="range" min="560" max="920" step="20" value="740" aria-label="Ширина строки" />
             </label>
+            <button class="icon-button" id="annotationButton" type="button" title="Рисовать маркером" aria-label="Рисовать маркером" aria-pressed="false">
+              <i data-lucide="highlighter"></i>
+            </button>
             <button class="icon-button" id="bookmarkButton" type="button" title="Добавить закладку" aria-label="Добавить закладку">
               <i data-lucide="bookmark-plus"></i>
             </button>
@@ -134,6 +137,31 @@
 
         <div class="progress-track" aria-hidden="true">
           <div id="progressBar"></div>
+        </div>
+
+        <div class="annotation-toolbar hidden" id="annotationToolbar" role="toolbar" aria-label="Инструменты рисования">
+          <div class="annotation-colors" role="group" aria-label="Цвет маркера">
+            <button class="annotation-swatch active" type="button" data-annotation-color="#e0523f" style="--swatch: #e0523f" title="Красный" aria-label="Красный"></button>
+            <button class="annotation-swatch" type="button" data-annotation-color="#f0c94d" style="--swatch: #f0c94d" title="Жёлтый" aria-label="Жёлтый"></button>
+            <button class="annotation-swatch" type="button" data-annotation-color="#2f9d91" style="--swatch: #2f9d91" title="Бирюзовый" aria-label="Бирюзовый"></button>
+            <button class="annotation-swatch" type="button" data-annotation-color="#20242a" style="--swatch: #20242a" title="Чёрный" aria-label="Чёрный"></button>
+          </div>
+          <label class="annotation-size" title="Толщина маркера">
+            <i data-lucide="circle-dot"></i>
+            <input id="annotationSize" type="range" min="2" max="24" step="1" value="8" aria-label="Толщина маркера" />
+          </label>
+          <button class="icon-button compact" id="annotationEraser" type="button" title="Ластик" aria-label="Ластик" aria-pressed="false">
+            <i data-lucide="eraser"></i>
+          </button>
+          <button class="icon-button compact" id="annotationUndo" type="button" title="Отменить штрих" aria-label="Отменить штрих">
+            <i data-lucide="undo-2"></i>
+          </button>
+          <button class="icon-button compact" id="annotationClear" type="button" title="Очистить текущую страницу" aria-label="Очистить текущую страницу">
+            <i data-lucide="trash-2"></i>
+          </button>
+          <button class="icon-button compact" id="annotationClose" type="button" title="Закрыть рисование" aria-label="Закрыть рисование">
+            <i data-lucide="x"></i>
+          </button>
         </div>
 
         <section class="reader-viewport" id="readerViewport">
@@ -164,6 +192,9 @@
           <span id="savedText">Готово к чтению</span>
         </footer>
         <div class="fullscreen-actions" role="group" aria-label="Действия в режиме чтения">
+          <button class="fullscreen-action" id="fullscreenAnnotationButton" type="button" title="Рисовать маркером" aria-label="Рисовать маркером" aria-pressed="false">
+            <i data-lucide="highlighter"></i>
+          </button>
           <button class="fullscreen-action" id="fullscreenBookmarkButton" type="button" title="Добавить закладку" aria-label="Добавить закладку">
             <i data-lucide="bookmark-plus"></i>
           </button>
