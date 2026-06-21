@@ -315,7 +315,7 @@ function clampReaderZoom(value) {
   return Math.min(2.4, Math.max(0.6, zoom));
 }
 
-function changeReaderZoom(deltaY) {
+function changeReaderZoom(deltaY, event) {
   const settings = getSettings();
   const currentZoom = clampReaderZoom(settings.readerZoom);
   const direction = deltaY < 0 ? 1 : -1;
@@ -323,13 +323,14 @@ function changeReaderZoom(deltaY) {
   if (nextZoom === currentZoom) return;
 
   const scrollTarget = getPrimaryScrollTarget();
+  const zoomAnchor = captureReaderZoomAnchor(event, scrollTarget);
   const scrollPosition = scrollTarget
     ? { top: scrollTarget.scrollTop, left: scrollTarget.scrollLeft }
     : null;
   const restoreScrollPosition = () => {
     if (!scrollTarget || !scrollPosition) return;
-    scrollTarget.scrollTop = scrollPosition.top;
-    scrollTarget.scrollLeft = scrollPosition.left;
+    if (zoomAnchor && restoreReaderZoomAnchor(zoomAnchor)) return;
+    setScrollPositionInstant(scrollTarget, scrollPosition.top, scrollPosition.left);
   };
 
   saveSettings({ readerZoom: nextZoom });
@@ -344,6 +345,72 @@ function changeReaderZoom(deltaY) {
   }, 180);
 
   showToast(`Масштаб ${Math.round(nextZoom * 100)}%`);
+}
+
+function captureReaderZoomAnchor(event, scrollTarget) {
+  if (!state.pdf || !scrollTarget) return null;
+  const pages = [...els.readerContent.querySelectorAll(".pdf-page")];
+  if (!pages.length) return null;
+
+  const viewportRect = els.readerViewport.getBoundingClientRect();
+  const eventX = Number(event?.clientX);
+  const eventY = Number(event?.clientY);
+  const clientX = Number.isFinite(eventX)
+    ? Math.min(viewportRect.right - 1, Math.max(viewportRect.left + 1, eventX))
+    : viewportRect.left + viewportRect.width / 2;
+  const clientY = Number.isFinite(eventY) && eventY >= viewportRect.top && eventY <= viewportRect.bottom
+    ? eventY
+    : viewportRect.top + viewportRect.height / 2;
+
+  let page = event?.target instanceof Element ? event.target.closest(".pdf-page") : null;
+  if (!page) {
+    page = pages.find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.top <= clientY && rect.bottom >= clientY;
+    }) || null;
+  }
+  if (!page) {
+    page = pages.reduce((closest, candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      const distance = Math.min(Math.abs(rect.top - clientY), Math.abs(rect.bottom - clientY));
+      return !closest || distance < closest.distance ? { page: candidate, distance } : closest;
+    }, null)?.page;
+  }
+  if (!page) return null;
+
+  const pageRect = page.getBoundingClientRect();
+  return {
+    scrollTarget,
+    pageNumber: Number(page.dataset.page || 1),
+    pageX: clamp01((clientX - pageRect.left) / Math.max(1, pageRect.width)),
+    pageY: clamp01((clientY - pageRect.top) / Math.max(1, pageRect.height)),
+    clientX,
+    clientY,
+  };
+}
+
+function restoreReaderZoomAnchor(anchor) {
+  const page = document.getElementById(`pdf-page-${anchor.pageNumber}`);
+  if (!page?.isConnected || !anchor.scrollTarget?.isConnected) return false;
+
+  const pageRect = page.getBoundingClientRect();
+  const anchoredX = pageRect.left + pageRect.width * anchor.pageX;
+  const anchoredY = pageRect.top + pageRect.height * anchor.pageY;
+  setScrollPositionInstant(
+    anchor.scrollTarget,
+    anchor.scrollTarget.scrollTop + anchoredY - anchor.clientY,
+    anchor.scrollTarget.scrollLeft + anchoredX - anchor.clientX,
+  );
+  return true;
+}
+
+function setScrollPositionInstant(target, top, left) {
+  const previousBehavior = target.style.scrollBehavior;
+  target.style.scrollBehavior = "auto";
+  target.scrollTop = Math.max(0, top);
+  target.scrollLeft = Math.max(0, left);
+  void target.scrollTop;
+  target.style.scrollBehavior = previousBehavior;
 }
 
 function showToast(message) {
@@ -2311,7 +2378,7 @@ function handleWheelScroll(event) {
   if (isReaderZoomGesture(event)) {
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (state.bookKey && event.deltaY !== 0) changeReaderZoom(event.deltaY);
+    if (state.bookKey && event.deltaY !== 0) changeReaderZoom(event.deltaY, event);
     return;
   }
   const target = event.target;
