@@ -2356,6 +2356,21 @@ function bindEvents() {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Control" || event.key === "Meta") state.zoomModifierPressed = true;
+    const target = event.target;
+    const isTextEntry = target instanceof HTMLElement
+      && (target.matches("input, textarea, select") || target.isContentEditable);
+    const isAnnotationUndo = state.annotationMode
+      && !isTextEntry
+      && !event.repeat
+      && !event.shiftKey
+      && (event.ctrlKey || event.metaKey)
+      && event.key.toLowerCase() === "z";
+    if (isAnnotationUndo) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      undoAnnotation();
+      return;
+    }
     if (event.key === "Escape" && state.annotationMode) {
       setAnnotationMode(false);
       return;
