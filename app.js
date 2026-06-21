@@ -125,12 +125,12 @@ function getPdfRenderSettings() {
     rootMargin: mobile ? "320px 0px" : "900px 0px",
     initialPages: mobile ? 1 : 3,
     maxConcurrent: mobile ? 1 : 2,
-    maxCachedPages: mobile ? 4 : 14,
-    keepAroundPage: mobile ? 2 : 5,
-    minScale: mobile ? 1.05 : 1.05,
-    maxScale: mobile ? 1.9 : 2.4,
-    pixelRatio: Math.min(window.devicePixelRatio || 1, mobile ? 1.75 : 1.75),
-    maxPixels: mobile ? 1600000 : 3200000,
+    maxCachedPages: mobile ? 4 : 8,
+    keepAroundPage: mobile ? 2 : 3,
+    minScale: mobile ? 1.15 : 1.2,
+    maxScale: mobile ? 2.4 : 4.2,
+    pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+    maxPixels: mobile ? 2800000 : 8500000,
   };
 }
 
@@ -1351,7 +1351,7 @@ async function parsePdf(buffer, fileName) {
   return { title, html: pages.join("\n"), pdf, pageCount: pdf.numPages, isPdf: true };
 }
 
-function startPdfRendering(pdf, pageCount) {
+function startPdfRendering(pdf, pageCount, anchorPageNumber = 1) {
   state.pdfObserver?.disconnect();
   state.pdf = pdf;
   state.pdfRenderToken += 1;
@@ -1380,7 +1380,15 @@ function startPdfRendering(pdf, pageCount) {
   });
 
   pages.forEach((page) => state.pdfObserver.observe(page));
-  pages.slice(0, Math.min(settings.initialPages, pageCount)).forEach((page) => queuePdfPageRender(Number(page.dataset.page), token, true));
+  const anchor = Math.min(pageCount, Math.max(1, Number(anchorPageNumber) || 1));
+  const priorityPages = [];
+  for (let distance = 0; priorityPages.length < Math.min(settings.initialPages, pageCount); distance += 1) {
+    const candidates = distance === 0 ? [anchor] : [anchor + distance, anchor - distance];
+    candidates.forEach((pageNumber) => {
+      if (pageNumber >= 1 && pageNumber <= pageCount && priorityPages.length < settings.initialPages) priorityPages.push(pageNumber);
+    });
+  }
+  priorityPages.forEach((pageNumber) => queuePdfPageRender(pageNumber, token, true));
 }
 
 function queuePdfPageRender(pageNumber, token, priority = false) {
@@ -1435,16 +1443,19 @@ async function renderPdfPage(pageNumber, token) {
     const preferredScale = Math.min(settings.maxScale, Math.max(settings.minScale, (availableWidth * settings.pixelRatio) / baseViewport.width));
     const scale = fitScaleToPixelBudget(preferredScale, baseViewport, settings.maxPixels);
     const viewport = page.getViewport({ scale });
-    const context = canvas.getContext("2d", { alpha: false });
-
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    canvas.style.width = "100%";
-    canvas.style.height = "100%";
+    const nextCanvas = document.createElement("canvas");
+    nextCanvas.className = "pdf-canvas";
+    nextCanvas.setAttribute("aria-label", canvas.getAttribute("aria-label") || `Страница ${pageNumber}`);
+    nextCanvas.width = Math.floor(viewport.width);
+    nextCanvas.height = Math.floor(viewport.height);
+    nextCanvas.style.width = "100%";
+    nextCanvas.style.height = "100%";
+    const context = nextCanvas.getContext("2d", { alpha: false });
 
     await page.render({ canvasContext: context, viewport }).promise;
-    page.cleanup?.();
     if (token !== state.pdfRenderToken) return;
+    page.cleanup?.();
+    canvas.replaceWith(nextCanvas);
     state.renderedPdfPages.add(pageNumber);
     section.classList.remove("is-rendering");
     section.classList.add("is-rendered");
@@ -2144,15 +2155,11 @@ function openBookmark(mark) {
 
 function refreshPdfPagesForLayout() {
   if (!state.pdf) return;
+  const anchorPageNumber = getCurrentPdfPageNumber();
   els.readerContent.querySelectorAll(".pdf-page").forEach((page) => {
-    const canvas = page.querySelector(".pdf-canvas");
-    page.classList.remove("is-rendering", "is-rendered", "is-failed");
-    if (canvas) {
-      canvas.removeAttribute("width");
-      canvas.removeAttribute("height");
-    }
+    page.classList.remove("is-rendering", "is-failed");
   });
-  startPdfRendering(state.pdf, els.readerContent.querySelectorAll(".pdf-page").length);
+  startPdfRendering(state.pdf, els.readerContent.querySelectorAll(".pdf-page").length, anchorPageNumber);
   requestAnimationFrame(refreshVisibleAnnotationCanvases);
 }
 
